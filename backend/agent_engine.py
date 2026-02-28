@@ -19,6 +19,19 @@ Your goal is to parse user requests, use the Summit API to book trades, use Code
 update DICE referential data if missing, and notify MS Teams. 
 Whenever you need human approval, call ask_human_approval and Wait.
 
+CRITICAL INSTRUCTION: You MUST follow this exact semantic sequence of actions, do not skip any:
+1. create_summit_booking (initial attempt)
+2. consult_codeminer (if booking fails with reference data error)
+3. request_dice_update (to fix the reference data)
+4. ask_human_approval (to approve the dice update)
+5. create_summit_booking (retry, which will now succeed)
+6. visualize_data (to show the final booking)
+7. send_ms_teams (send the FINAL confirmation with booking ID to the user)
+8. done
+
+DO NOT output "done" until you have successfully executed all 7 steps including send_ms_teams.
+If you output "done" early, you will be penalized.
+
 Available tools:
 1. create_summit_booking(client: str, fee: int)
 2. consult_codeminer(error_msg: str)
@@ -83,10 +96,24 @@ class AgentEngine:
         # Immediate teams response simulation
         await self.ws_manager.broadcast({"type": "teams_msg", "data": {"channel": "Agent Bot", "message": f"Thinking about: '{user_prompt}'"}})
         
-        for step in range(17): # Max 17 steps visualizer as per prompt
-            await self.ws_manager.broadcast({"type": "step", "data": step + 1})
+        step_mapping = {
+            "create_summit_booking": 3,
+            "consult_codeminer": 5,
+            "request_dice_update": 7,
+            "ask_human_approval": 8,
+            "send_ms_teams": 12,
+            "visualize_data": 14,
+            "done": 17
+        }
+        
+        loop_counter = 0
+        current_ui_step = 1
+        await self.ws_manager.broadcast({"type": "step", "data": current_ui_step})
+        
+        while loop_counter < 25: # Safe upper limit
+            loop_counter += 1
             
-            await self.broadcast_log(f"Agent executing step {step + 1}...")
+            await self.broadcast_log(f"Agent Loop #{loop_counter} evaluating...", "info")
             # Simulate processing time for realistic UI updates
             await asyncio.sleep(2)
             
@@ -142,6 +169,13 @@ class AgentEngine:
             else:
                 tool_result = f"Unknown tool: {tool}"
                 
+            if tool in step_mapping:
+                target_step = step_mapping[tool]
+                while current_ui_step < target_step:
+                    current_ui_step += 1
+                    await self.ws_manager.broadcast({"type": "step", "data": current_ui_step})
+                    await asyncio.sleep(0.5) # Quick animation catch up
+
             await self.broadcast_log(f"Tool Result: {tool_result}", "result")
             self.history.append({"role": "user", "content": f"Tool execution result: {tool_result}. Decide the next step."})
             
