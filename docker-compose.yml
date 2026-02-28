@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # The Ollama service with GPU passthrough
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mcp_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - D:/Projects/models/ollama:/root/.ollama
+      - ./setup_ollama.sh:/setup_ollama.sh
+    # Command to run ollama and pull the required model on startup
+    entrypoint: [ "/bin/sh", "-c" ]
+    command: >
+      "ollama serve & sleep 2 && ollama pull llama3.2 && wait"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+
+  # Production Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mcp_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+
+  # Production Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mcp_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
