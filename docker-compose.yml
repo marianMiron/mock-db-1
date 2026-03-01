@@ -8,7 +8,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - D:/Projects/models/ollama:/root/.ollama
+      - C:/Projects/models/ollama:/root/.ollama
       - ./setup_ollama.sh:/setup_ollama.sh
     # Command to run ollama and pull the required model on startup
     entrypoint: [ "/bin/sh", "-c" ]
