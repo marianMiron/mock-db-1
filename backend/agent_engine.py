@@ -13,7 +13,7 @@ from mock_apis import (
 # You can configure Ollama Host
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
-SYSTEM_PROMPT = """You are FinAgent, a Senior Principal AI Engineer & DevOps Architect Agent.
+SYSTEM_PROMPT = """You are FinAgent, a financial workflow automation agent.
 You handle complex financial booking workflows. You use tools (functions) to act on the environment.
 Your goal is to parse user requests, use the Summit API to book trades, use CodeMiner if errors occur,
 update DICE referential data if missing, and notify MS Teams. 
@@ -131,13 +131,20 @@ class AgentEngine:
             args = action.get("tool_args", {})
             
             await self.broadcast_log(f"Thought: {thought}", "thought")
-            
+
+            if tool in step_mapping:
+                target_step = step_mapping[tool]
+                while current_ui_step < target_step:
+                    current_ui_step += 1
+                    await self.ws_manager.broadcast({"type": "step", "data": current_ui_step})
+                    await asyncio.sleep(0.5) # Quick animation catch up
+
             if tool == "done":
                 await self.broadcast_log("Workflow Complete.", "success")
                 break
-                
+
             await self.broadcast_log(f"Calling Tool: {tool} with {json.dumps(args)}", "action")
-            
+
             tool_result = ""
             if tool == "create_summit_booking":
                 tool_result = mock_create_summit_booking(args.get("client", ""), args.get("fee", 0))
@@ -155,12 +162,12 @@ class AgentEngine:
             elif tool == "ask_human_approval":
                 self.human_approval_event.clear()
                 await self.ws_manager.broadcast({
-                    "type": "require_approval", 
+                    "type": "require_approval",
                     "data": args.get("reason", "Human approval required.")
                 })
                 await self.broadcast_log("Waiting for human approval...", "warning")
                 await self.human_approval_event.wait()
-                
+
                 if self.approval_result:
                     tool_result = "Human APPROVED."
                 else:
@@ -168,13 +175,6 @@ class AgentEngine:
                 await self.broadcast_log(f"Approval Result: {tool_result}", "system")
             else:
                 tool_result = f"Unknown tool: {tool}"
-                
-            if tool in step_mapping:
-                target_step = step_mapping[tool]
-                while current_ui_step < target_step:
-                    current_ui_step += 1
-                    await self.ws_manager.broadcast({"type": "step", "data": current_ui_step})
-                    await asyncio.sleep(0.5) # Quick animation catch up
 
             await self.broadcast_log(f"Tool Result: {tool_result}", "result")
             self.history.append({"role": "user", "content": f"Tool execution result: {tool_result}. Decide the next step."})
