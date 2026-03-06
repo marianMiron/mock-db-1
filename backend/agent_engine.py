@@ -89,7 +89,56 @@ class AgentEngine:
         self.approval_result = status
         self.human_approval_event.set()
 
+    async def _is_on_topic(self, user_prompt: str) -> bool:
+        """Quick classifier call to check if the prompt is related to financial trading/booking."""
+        check_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a topic classifier. Your only job is to decide whether a user message "
+                    "is related to financial trading, trade booking, swaps, financial workflows, "
+                    "or any related financial operations. "
+                    "Respond ONLY with a JSON object: {\"on_topic\": true} or {\"on_topic\": false}. "
+                    "No other text."
+                )
+            },
+            {"role": "user", "content": user_prompt}
+        ]
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{OLLAMA_HOST}/api/chat",
+                    json={
+                        "model": "llama3.2",
+                        "messages": check_messages,
+                        "stream": False,
+                        "format": "json"
+                    },
+                    timeout=60.0
+                )
+                response.raise_for_status()
+                result = json.loads(response.json()["message"]["content"])
+                return bool(result.get("on_topic", False))
+            except Exception:
+                # If the check fails for any reason, allow the prompt through
+                return True
+
     async def run_loop(self, user_prompt: str):
+        # Guard: reject off-topic messages before starting the workflow
+        await self.broadcast_log(f"Checking if request is on topic...", "info")
+        if not await self._is_on_topic(user_prompt):
+            off_topic_msg = (
+                "Your message is not related to the topic of this assistant. "
+                "I can only help with financial trading, trade booking, and related financial workflows. "
+                "Please rephrase your request or ask a relevant question."
+            )
+            await self.broadcast_log(off_topic_msg, "warning")
+            await self.ws_manager.broadcast({
+                "type": "teams_msg",
+                "data": {"channel": "Agent Bot", "message": off_topic_msg}
+            })
+            return
+
         self.history.append({"role": "user", "content": user_prompt})
         await self.broadcast_log(f"User Request: {user_prompt}", "user")
         
